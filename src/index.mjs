@@ -65,14 +65,24 @@ export function listen(options) {
 
   const allowed = options.origins || [location.hostname];
   const ignores = options.ignores || [];
-
+  
   const timeoutFn = options.timeoutFn || requestIdleCallback;
+  const timeout = options.timeout || 2000;
   const hrefFn = typeof options.hrefFn === 'function' && options.hrefFn;
+  const targetAncestor = options.ancestor || document.querySelectorAll('a');
 
-  const observer = new IntersectionObserver(entries => {
-    entries.forEach(entry => {
-      if (entry.isIntersecting) {
-        observer.unobserve(entry = entry.target);
+  const intersectionRatio = options.intersectionRatio || 0.5;
+  const effectiveType = options.effectiveType || "2g";
+
+  let elementsToPrefecth =  [];
+  let isTouchDown = false;
+
+  document.addEventListener('touchend', function() {
+    targetAncestor.forEach(entry => {
+      setTimeout(() => {
+        if(!entry.getAttribute('prefetch'))
+          return;
+        observer.unobserve(entry);
         // Do not prefetch if will match/exceed limit
         if (toPrefetch.size < limit) {
           toAdd(() => {
@@ -81,13 +91,36 @@ export function listen(options) {
             });
           });
         }
+      }, timeout);
+    });
+  });
+
+  const observer = new IntersectionObserver(entries => {
+    entries.forEach(entry => {
+      if (conn = navigator.connection) {
+        // Don't prefetch if using 2G or if Save-Data is enabled.
+        if (conn.saveData) {
+          observer.unobserve(entry = entry.target);
+          return Promise.reject(new Error('Cannot prefetch, Save-Data is enabled'));
+        }
+        if ((new RegExp('/'+effectiveType+'/')).test(conn.effectiveType)) {
+          observer.unobserve(entry = entry.target);
+          return Promise.reject(new Error('Cannot prefetch, network conditions are poor'));
+        }
+      }
+      if (entry.isIntersecting && entry.intersectionRatio >= intersectionRatio) {
+        entry.target.setAttribute('prefetch','true');
+      } else {
+        entry.target.removeAttribute('prefetch');
       }
     });
+  },{
+    threshold: [0.25, 0.5, 1]
   });
 
   timeoutFn(() => {
     // Find all links & Connect them to IO if allowed
-    (options.el || document).querySelectorAll('a').forEach(link => {
+    targetAncestor.forEach(link => {
       // If the anchor matches a permitted origin
       // ~> A `[]` or `true` means everything is allowed
       if (!allowed.length || allowed.includes(link.hostname)) {
@@ -107,7 +140,6 @@ export function listen(options) {
   };
 }
 
-
 /**
 * Prefetch a given URL with an optional preferred fetch priority
 * @param {String} url - the URL to fetch
@@ -116,16 +148,6 @@ export function listen(options) {
 * @return {Object} a Promise
 */
 export function prefetch(url, isPriority, conn) {
-  if (conn = navigator.connection) {
-    // Don't prefetch if using 2G or if Save-Data is enabled.
-    if (conn.saveData) {
-      return Promise.reject(new Error('Cannot prefetch, Save-Data is enabled'));
-    }
-    if (/2g/.test(conn.effectiveType)) {
-      return Promise.reject(new Error('Cannot prefetch, network conditions are poor'));
-    }
-  }
-
   // Dev must supply own catch()
   return Promise.all(
       [].concat(url).map(str => {
